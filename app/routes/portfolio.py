@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from app.optimizer import optimize_portfolio
@@ -7,37 +7,38 @@ router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
 # Request model
 class OptimizeRequest(BaseModel):
-    lista_acoes: List[str] = Field(min_length=1)
-    lista_dy: List[float]
-    lista_desvio_padrao: List[float]
-    lista_setor: List[str]
-    percentual_maximo_por_setor: float = Field(0.2, gt=0, le=1)
-
+    stock_list: List[str] = Field(min_length=1)
+    dy_list: List[float]
+    standard_deviation_list: List[float]
+    sectors_list: List[str]
+    max_percentage_per_sector: float = Field(0.2, gt=0, le=1) 
+    acceptable_risk: Optional[float] = None
 # Response models
 class AllocationByAsset(BaseModel):
-    ativo: str
-    setor: str
-    percentual: float  # in %
+    stock: str
+    sector: str
+    percentage: float  # in %
 
 class OptimizeResponse(BaseModel):
     dividend_yield: float
-    risco_carteira: float
-    risco_aceitavel: float
-    alocacao_por_ativo: List[AllocationByAsset]
-    alocacao_por_setor: Dict[str, float]
+    portfolio_risk: float
+    acceptable_risk: float
+    stock_allocation: List[AllocationByAsset]
+    allocation_by_sector: Dict[str, float]
 
 @router.post("/optimize", response_model=OptimizeResponse)
 def optimize(req: OptimizeRequest):
-    n = len(req.lista_acoes)
-    if not (len(req.lista_dy) == n and len(req.lista_desvio_padrao) == n and len(req.lista_setor) == n):
+    n = len(req.stock_list)
+    if not (len(req.dy_list) == n and len(req.standard_deviation_list) == n and len(req.sectors_list) == n):
         raise HTTPException(status_code=400, detail="All lists must have the same length.")
 
     result = optimize_portfolio(
-        req.lista_acoes,
-        req.lista_dy,
-        req.lista_desvio_padrao,
-        req.lista_setor,
-        req.percentual_maximo_por_setor,
+        req.stock_list,
+        req.dy_list,
+        req.standard_deviation_list,
+        req.sectors_list,
+        req.acceptable_risk,
+        req.max_percentage_per_sector,
     )
 
     if result is None:
