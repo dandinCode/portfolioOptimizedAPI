@@ -64,7 +64,7 @@ pip install requirements.txt
 1. Execute o servidor localmente:
 
 ```bash
-uvicorn app.main:app --reload
+python -m uvicorn main:app --reload
 ```
 
 2. O servidor estará disponível em: http://127.0.0.1:8000
