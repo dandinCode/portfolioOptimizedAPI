@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from app.optimizer import optimize_portfolio
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
@@ -13,6 +13,16 @@ class OptimizeRequest(BaseModel):
     sectors_list: List[str]
     max_percentage_per_sector: float = Field(0.2, gt=0, le=1) 
     acceptable_risk: Optional[float] = None
+
+    @model_validator(mode="after")
+    def validate_sectors(self):
+        if len(set(self.sectors_list)) < 5:
+            raise HTTPException(
+                status_code=400,
+                detail="São necessários pelo menos 5 setores diferentes."
+            )
+        return self
+    
 # Response models
 class AllocationByAsset(BaseModel):
     stock: str
