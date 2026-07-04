@@ -52,6 +52,6 @@ def optimize(req: OptimizeRequest):
     )
 
     if result is None:
-        raise HTTPException(status_code=422, detail="No feasible solution with given constraints.")
+        raise HTTPException(status_code=422, detail="Não existe solução viável com as restrições dadas.")
 
     return result
