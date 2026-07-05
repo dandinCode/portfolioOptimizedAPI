@@ -1,57 +1,103 @@
-from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, model_validator
+
+from app.custom_optimizer import optimize_portfolio_custom
 from app.optimizer import optimize_portfolio
+from app.schemas.portfolio import (
+    ConstraintConfig,
+    ConstraintDefinition,
+    OptimizeRequest,
+    OptimizeResponse,
+)
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
-# Request model
-class OptimizeRequest(BaseModel):
-    stock_list: List[str] = Field(min_length=1)
-    dy_list: List[float]
-    standard_deviation_list: List[float]
-    sectors_list: List[str]
-    max_percentage_per_sector: float = Field(0.2, gt=0, le=1) 
-    acceptable_risk: Optional[float] = None
+MIN_SECTORS = 5
+MODEL_1_0 = "1.0"
+MODEL_CUSTOM = "custom"
 
-    @model_validator(mode="after")
-    def validate_sectors(self):
-        if len(set(self.sectors_list)) < 5:
-            raise HTTPException(
-                status_code=400,
-                detail="São necessários pelo menos 5 setores diferentes."
-            )
-        return self
-    
-# Response models
-class AllocationByAsset(BaseModel):
-    stock: str
-    sector: str
-    percentage: float  # in %
+AVAILABLE_CONSTRAINTS = [
+    ConstraintDefinition(
+        key="use_risk_limit",
+        label="Limite de risco",
+        description="A carteira não pode ultrapassar o risco aceitável (volatilidade ponderada).",
+        default_enabled=True,
+    ),
+    ConstraintDefinition(
+        key="use_sector_cap",
+        label="Limite por setor",
+        description="Nenhum setor pode concentrar mais do que o percentual máximo definido.",
+        default_enabled=True,
+    ),
+    ConstraintDefinition(
+        key="use_full_allocation",
+        label="Alocação total",
+        description="Todo o capital deve ser distribuído entre os ativos (100%).",
+        default_enabled=True,
+    ),
+    ConstraintDefinition(
+        key="require_min_sectors",
+        label="Diversificação mínima",
+        description=f"Exige pelo menos {MIN_SECTORS} setores diferentes na seleção.",
+        default_enabled=True,
+    ),
+]
 
-class OptimizeResponse(BaseModel):
-    dividend_yield: float
-    portfolio_risk: float
-    acceptable_risk: float
-    stock_allocation: List[AllocationByAsset]
-    allocation_by_sector: Dict[str, float]
+DEFAULT_CONSTRAINTS = ConstraintConfig()
+
+
+def _validate_min_sectors(sectors_list: list[str]) -> None:
+    if len(set(sectors_list)) < MIN_SECTORS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"São necessários pelo menos {MIN_SECTORS} setores diferentes.",
+        )
+
+
+@router.get("/constraints", response_model=list[ConstraintDefinition])
+def list_constraints():
+    return AVAILABLE_CONSTRAINTS
+
 
 @router.post("/optimize", response_model=OptimizeResponse)
 def optimize(req: OptimizeRequest):
-    n = len(req.stock_list)
-    if not (len(req.dy_list) == n and len(req.standard_deviation_list) == n and len(req.sectors_list) == n):
-        raise HTTPException(status_code=400, detail="All lists must have the same length.")
-
-    result = optimize_portfolio(
-        req.stock_list,
-        req.dy_list,
-        req.standard_deviation_list,
-        req.sectors_list,
-        req.acceptable_risk,
-        req.max_percentage_per_sector,
-    )
+    if req.model_id == MODEL_1_0:
+        _validate_min_sectors(req.sectors_list)
+        result = optimize_portfolio(
+            req.stock_list,
+            req.dy_list,
+            req.standard_deviation_list,
+            req.sectors_list,
+            req.acceptable_risk,
+            req.max_percentage_per_sector,
+        )
+        constraints_applied = DEFAULT_CONSTRAINTS
+    elif req.model_id == MODEL_CUSTOM:
+        if req.constraints.require_min_sectors:
+            _validate_min_sectors(req.sectors_list)
+        result = optimize_portfolio_custom(
+            req.stock_list,
+            req.dy_list,
+            req.standard_deviation_list,
+            req.sectors_list,
+            req.acceptable_risk,
+            req.max_percentage_per_sector,
+            req.constraints,
+        )
+        constraints_applied = req.constraints
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Modelo "{req.model_id}" não suportado pela API de otimização.',
+        )
 
     if result is None:
-        raise HTTPException(status_code=422, detail="Não existe solução viável com as restrições dadas.")
+        raise HTTPException(
+            status_code=422,
+            detail="Não existe solução viável com as restrições dadas.",
+        )
 
-    return result
+    return OptimizeResponse(
+        model_id=req.model_id,
+        constraints_applied=constraints_applied,
+        **result,
+    )
